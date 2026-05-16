@@ -264,6 +264,23 @@ namespace esphome {
 
         void controlFan();
         void controlSwing();
+
+        // Preset support: a preset bundles a set of defaults applied when the
+        // preset is selected. Only standard ClimatePreset enums are supported
+        // (HOME, AWAY, SLEEP, ECO, BOOST, COMFORT, ACTIVITY).
+        struct PresetConfig {
+            optional<climate::ClimateMode> mode;
+            optional<climate::ClimateFanMode> fan_mode;
+            optional<float> target_temperature;
+            optional<float> target_temperature_low;
+            optional<float> target_temperature_high;
+        };
+        void register_preset_mode(climate::ClimatePreset preset, climate::ClimateMode mode);
+        void register_preset_fan_mode(climate::ClimatePreset preset, climate::ClimateFanMode fan_mode);
+        void register_preset_target_temperature(climate::ClimatePreset preset, float t);
+        void register_preset_target_temperature_low(climate::ClimatePreset preset, float t);
+        void register_preset_target_temperature_high(climate::ClimatePreset preset, float t);
+        bool processPresetChange(const esphome::climate::ClimateCall& call);
         // Bootstrap connexion CN105 en loop() (ÃÂ©vite de perdre les tout premiers logs OTA)
         void maybe_start_connection_();
 
@@ -332,6 +349,8 @@ namespace esphome {
         uint32_t update_interval_;
 
         climate::ClimateTraits traits_;
+
+        std::map<climate::ClimatePreset, PresetConfig> preset_configs_;
 
         //Accessor method for the HardwareSerial pointer
         uart::UARTComponent* get_hw_serial_() {

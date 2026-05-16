@@ -24,6 +24,7 @@ from esphome.const import (
     CONF_MODE,
     CONF_FAN_MODE,
     CONF_SWING_MODE,
+    CONF_PRESET,
     CONF_UART_ID,
     CONF_ENTITY_CATEGORY,
     ENTITY_CATEGORY_DIAGNOSTIC,
@@ -117,6 +118,11 @@ CONF_POWER_UNIT_IS_BTU = "power_unit_is_btu"
 
 # Support explicite du DUAL setpoint via YAML
 CONF_DUAL_SETPOINT = "dual_setpoint"
+
+# Preset support
+CONF_DEFAULT_TARGET_TEMPERATURE = "default_target_temperature"
+CONF_DEFAULT_TARGET_TEMPERATURE_LOW = "default_target_temperature_low"
+CONF_DEFAULT_TARGET_TEMPERATURE_HIGH = "default_target_temperature_high"
 
 DEFAULT_CLIMATE_MODES = ["AUTO", "COOL", "HEAT", "DRY", "FAN_ONLY", "HEAT_COOL"]
 DEFAULT_FAN_MODES = ["AUTO", "MIDDLE", "QUIET", "LOW", "MEDIUM", "HIGH"]
@@ -364,6 +370,20 @@ HARDWARE_SETTING_SCHEMA = cv.Schema(
     }
 )
 
+# A preset bundles defaults (mode/fan/setpoints) applied when the preset is
+# selected. Only standard ClimatePreset names are accepted (HOME, AWAY, SLEEP,
+# ECO, BOOST, COMFORT, ACTIVITY).
+PRESET_SCHEMA = cv.Schema(
+    {
+        cv.Required(CONF_NAME): climate.validate_climate_preset,
+        cv.Optional(CONF_MODE): climate.validate_climate_mode,
+        cv.Optional(CONF_FAN_MODE): climate.validate_climate_fan_mode,
+        cv.Optional(CONF_DEFAULT_TARGET_TEMPERATURE): cv.temperature,
+        cv.Optional(CONF_DEFAULT_TARGET_TEMPERATURE_LOW): cv.temperature,
+        cv.Optional(CONF_DEFAULT_TARGET_TEMPERATURE_HIGH): cv.temperature,
+    }
+)
+
 CONFIG_SCHEMA = (
     climate.climate_schema(CN105Climate)
     .extend(
@@ -434,6 +454,7 @@ CONFIG_SCHEMA = (
             ): REMOTE_TEMPERATURE_CONTROL_SENSOR_SCHEMA,
             #cv.Optional(CONF_REMOTE_TEMPERATURE_MARGIN, default=0.4): cv.positive_float,
             cv.Optional(CONF_POWER_UNIT_IS_BTU, default=False): cv.boolean,
+            cv.Optional(CONF_PRESET): cv.ensure_list(PRESET_SCHEMA),
             cv.Optional(CONF_SUPPORTS, default={}): cv.Schema(
                 {
                     cv.Optional(
@@ -542,6 +563,45 @@ def to_code(config):
                 cg.add(
                     traits.add_supported_swing_mode(
                         climate.CLIMATE_SWING_MODES[swing_mode_str]
+                    )
+                )
+
+    if CONF_PRESET in config:
+        traits = var.config_traits()
+        for preset_conf in config[CONF_PRESET]:
+            preset_name = preset_conf[CONF_NAME]
+            preset_enum = climate.CLIMATE_PRESETS[preset_name]
+            cg.add(traits.add_supported_preset(preset_enum))
+            if CONF_MODE in preset_conf:
+                cg.add(
+                    var.register_preset_mode(
+                        preset_enum,
+                        climate.CLIMATE_MODES[preset_conf[CONF_MODE]],
+                    )
+                )
+            if CONF_FAN_MODE in preset_conf:
+                cg.add(
+                    var.register_preset_fan_mode(
+                        preset_enum,
+                        climate.CLIMATE_FAN_MODES[preset_conf[CONF_FAN_MODE]],
+                    )
+                )
+            if CONF_DEFAULT_TARGET_TEMPERATURE in preset_conf:
+                cg.add(
+                    var.register_preset_target_temperature(
+                        preset_enum, preset_conf[CONF_DEFAULT_TARGET_TEMPERATURE]
+                    )
+                )
+            if CONF_DEFAULT_TARGET_TEMPERATURE_LOW in preset_conf:
+                cg.add(
+                    var.register_preset_target_temperature_low(
+                        preset_enum, preset_conf[CONF_DEFAULT_TARGET_TEMPERATURE_LOW]
+                    )
+                )
+            if CONF_DEFAULT_TARGET_TEMPERATURE_HIGH in preset_conf:
+                cg.add(
+                    var.register_preset_target_temperature_high(
+                        preset_enum, preset_conf[CONF_DEFAULT_TARGET_TEMPERATURE_HIGH]
                     )
                 )
 

@@ -67,6 +67,7 @@ void CN105Climate::controlDelegate(const esphome::climate::ClimateCall& call) {
 
     logCheckWantedSettingsMutex(this->wantedSettings);
 
+    updated = this->processPresetChange(call) || updated;
     updated = this->processModeChange(call) || updated;
     updated = this->processTemperatureChange(call) || updated;
     updated = this->processFanChange(call) || updated;
@@ -236,6 +237,64 @@ bool CN105Climate::processFanChange(const esphome::climate::ClimateCall& call) {
     ESP_LOGD("control", "Fan change asked");
     this->fan_mode = *call.get_fan_mode();
     this->controlFan();
+    return true;
+}
+
+void CN105Climate::register_preset_mode(climate::ClimatePreset preset, climate::ClimateMode mode) {
+    this->preset_configs_[preset].mode = mode;
+}
+void CN105Climate::register_preset_fan_mode(climate::ClimatePreset preset, climate::ClimateFanMode fan_mode) {
+    this->preset_configs_[preset].fan_mode = fan_mode;
+}
+void CN105Climate::register_preset_target_temperature(climate::ClimatePreset preset, float t) {
+    this->preset_configs_[preset].target_temperature = t;
+}
+void CN105Climate::register_preset_target_temperature_low(climate::ClimatePreset preset, float t) {
+    this->preset_configs_[preset].target_temperature_low = t;
+}
+void CN105Climate::register_preset_target_temperature_high(climate::ClimatePreset preset, float t) {
+    this->preset_configs_[preset].target_temperature_high = t;
+}
+
+bool CN105Climate::processPresetChange(const esphome::climate::ClimateCall& call) {
+    if (!call.get_preset().has_value()) {
+        return false;
+    }
+    climate::ClimatePreset preset = *call.get_preset();
+    this->preset = preset;
+    ESP_LOGD("control", "Preset change requested: %d", (int)preset);
+
+    auto it = this->preset_configs_.find(preset);
+    if (it == this->preset_configs_.end()) {
+        ESP_LOGW("control", "Preset %d has no associated config", (int)preset);
+        return true;
+    }
+    const PresetConfig& cfg = it->second;
+
+    if (cfg.mode.has_value()) {
+        this->mode = *cfg.mode;
+        this->controlMode();
+    }
+
+    bool tempApplied = false;
+    if (cfg.target_temperature_low.has_value() && cfg.target_temperature_high.has_value()) {
+        float low = this->fahrenheitSupport_.normalizeUiTemperatureToHeatpumpTemperature(*cfg.target_temperature_low);
+        float high = this->fahrenheitSupport_.normalizeUiTemperatureToHeatpumpTemperature(*cfg.target_temperature_high);
+        this->handleDualSetpointBoth(low, high);
+        tempApplied = true;
+    } else if (cfg.target_temperature.has_value()) {
+        float t = this->fahrenheitSupport_.normalizeUiTemperatureToHeatpumpTemperature(*cfg.target_temperature);
+        this->setTargetTemperature(t);
+        tempApplied = true;
+    }
+    if (tempApplied) {
+        this->controlTemperature();
+    }
+
+    if (cfg.fan_mode.has_value()) {
+        this->fan_mode = *cfg.fan_mode;
+        this->controlFan();
+    }
     return true;
 }
 
