@@ -580,10 +580,10 @@ void CN105Climate::controlMode() {
         break;
 
     case climate::CLIMATE_MODE_HEAT_COOL:
-        // Don't send hardware AUTO — Mitsubishi's AUTO has a ±4°C deadband
-        // around a single setpoint and can't model a real high/low band.
-        // Defer to evaluateInternalHeatCool, which picks HEAT or COOL based
-        // on current vs band.
+        // Don't send hardware AUTO — that's a single-setpoint mode with a
+        // ±4°C deadband around that setpoint, so it can't model a high/low
+        // band. Defer to evaluateInternalHeatCool, which picks HEAT or COOL
+        // based on current vs band.
         ESP_LOGI("control", "entering HEAT_COOL (internal mode selection)");
         this->evaluateInternalHeatCool("controlMode");
         break;
