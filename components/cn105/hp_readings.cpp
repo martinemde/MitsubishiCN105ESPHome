@@ -426,20 +426,26 @@ void CN105Climate::terminateCycle() {
     this->nbCompleteCycles_++;
 }
 void CN105Climate::getErrorInfoFromResponsePacket() {
-    ESP_LOGD("Decoder", "0x04 error info");
-    if (this->error_code_sensor_ != nullptr) {
-        uint8_t error_raw = this->data[4];
-        uint8_t error_sub = this->data[5];
-        // Bit 7 (0x80) is a protocol status flag ("error reporting available"),
-        // not an actual error code. Use lower 7 bits for real error detection.
-        uint8_t error_code = error_raw & 0x7F;
-        if (error_code == 0x00 && error_sub == 0x00) {
-            this->error_code_sensor_->publish_state("No Error");
-        } else {
-            char buf[32];
-            snprintf(buf, sizeof(buf), "Error 0x%02X sub 0x%02X", error_code, error_sub);
-            this->error_code_sensor_->publish_state(buf);
-        }
+    if (this->error_code_sensor_ == nullptr) {
+        return;
+    }
+    uint8_t error_raw = this->data[4];
+    uint8_t error_sub = this->data[5];
+    // Bit 7 (0x80) is a protocol status flag ("error reporting available"),
+    // not an actual error code. Use lower 7 bits for real error detection.
+    uint8_t error_code = error_raw & 0x7F;
+    char buf[32];
+    const char* new_state;
+    if (error_code == 0x00 && error_sub == 0x00) {
+        new_state = "No Error";
+    } else {
+        snprintf(buf, sizeof(buf), "Error 0x%02X sub 0x%02X", error_code, error_sub);
+        new_state = buf;
+    }
+    // Only publish (and log) on actual change — text_sensor logs every publish.
+    if (!this->error_code_sensor_->has_state() || this->error_code_sensor_->state != new_state) {
+        ESP_LOGD("Decoder", "0x04 error info: %s", new_state);
+        this->error_code_sensor_->publish_state(new_state);
     }
 }
 
