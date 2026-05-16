@@ -542,6 +542,11 @@ void CN105Climate::statusChanged(heatpumpStatus status) {
         this->currentStatus.outsideAirTemperature = status.outsideAirTemperature;
         this->setCurrentTemperature(this->currentStatus.roomTemperature);
 
+        // After each room-temperature update, re-evaluate internal HEAT_COOL
+        // mode selection so the unit flips between HEAT/COOL as temperature
+        // crosses band edges. No-op for any other logical mode.
+        this->evaluateInternalHeatCool("statusChanged");
+
         this->updateAction();       // update action info on HA climate component
         this->publish_state();
 

@@ -256,6 +256,62 @@ void CN105Climate::register_preset_target_temperature_high(climate::ClimatePrese
     this->preset_configs_[preset].target_temperature_high = t;
 }
 
+void CN105Climate::evaluateInternalHeatCool(const char* trigger) {
+    if (this->mode != climate::CLIMATE_MODE_HEAT_COOL) {
+        return;
+    }
+
+    float current = this->getCurrentTemperature();
+    float low = this->getTargetTemperatureLow();
+    float high = this->getTargetTemperatureHigh();
+
+    if (std::isnan(current) || std::isnan(low) || std::isnan(high)) {
+        ESP_LOGW("control", "HEAT_COOL eval (%s): missing values current=%.1f low=%.1f high=%.1f — deferring",
+            trigger, current, low, high);
+        return;
+    }
+
+    const char* desired_mode = nullptr;
+    float desired_setpoint = NAN;
+
+    if (current > high) {
+        desired_mode = "COOL";
+        desired_setpoint = high;
+    } else if (current < low) {
+        desired_mode = "HEAT";
+        desired_setpoint = low;
+    } else {
+        // In-band: leave the unit in whichever mode it was last. Mitsubishi
+        // modulates the variable-speed compressor down on its own when at /
+        // past setpoint. Flipping HEAT↔COOL just to "be idle" wastes energy.
+        ESP_LOGD("control", "HEAT_COOL eval (%s): in-band current=%.1f band=[%.1f-%.1f] — leaving unit alone",
+            trigger, current, low, high);
+        return;
+    }
+
+    const char* current_hw_mode =
+        this->wantedSettings.mode != nullptr ? this->wantedSettings.mode :
+        (this->currentSettings.mode != nullptr ? this->currentSettings.mode : "");
+
+    bool mode_change = (strcmp(current_hw_mode, desired_mode) != 0);
+    bool temp_change = std::isnan(this->wantedSettings.temperature) ||
+        fabsf(this->wantedSettings.temperature - desired_setpoint) > 0.05f;
+
+    if (!mode_change && !temp_change) {
+        return;
+    }
+
+    ESP_LOGI("control", "HEAT_COOL eval (%s): current=%.1f band=[%.1f-%.1f] -> %s @ %.1f (was %s)",
+        trigger, current, low, high, desired_mode, desired_setpoint, current_hw_mode);
+
+    this->setModeSetting(desired_mode);
+    this->setPowerSetting("ON");
+    this->wantedSettings.temperature = desired_setpoint;
+    this->wantedSettings.hasChanged = true;
+    this->wantedSettings.hasBeenSent = false;
+    this->wantedSettings.lastChange = CUSTOM_MILLIS;
+}
+
 bool CN105Climate::processPresetChange(const esphome::climate::ClimateCall& call) {
     if (!call.get_preset().has_value()) {
         return false;
@@ -436,38 +492,12 @@ void CN105Climate::controlTemperature() {
     // Utiliser la logique appropriée selon les traits
     switch (this->mode) {
     case climate::CLIMATE_MODE_HEAT_COOL:
-        // Mode HEAT_COOL (new): displays 2 sliders
-        // BUT sends AUTO command to Mitsubishi hardware
-        // with internal deadband logic
-        if (this->traits_.has_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE)) {
-            if ((!std::isnan(currentSettings.temperature)) && (currentSettings.temperature > 0)) {
-                // Initialize if values are missing
-                if (std::isnan(this->getTargetTemperatureLow())) {
-                    this->setTargetTemperatureLow(currentSettings.temperature - 2.0f);
-                }
-                if (std::isnan(this->getTargetTemperatureHigh())) {
-                    this->setTargetTemperatureHigh(currentSettings.temperature + 2.0f);
-                }
-                ESP_LOGI("control", "Initializing HEAT_COOL mode temps from current PAC temp: %.1f -> [%.1f - %.1f]",
-                    currentSettings.temperature, this->getTargetTemperatureLow(), this->getTargetTemperatureHigh());
-            }
-            // In HEAT_COOL, use deadband to calculate 'setting'
-            float current = this->getCurrentTemperature();
-            if (!std::isnan(current)) {
-                float low = this->getTargetTemperatureLow();
-                float high = this->getTargetTemperatureHigh();
-                if (current < low) setting = low;
-                else if (current > high) setting = high;
-                else setting = current; // Idle
-                ESP_LOGD("control", "HEAT_COOL deadband: current=%.1f, low=%.1f, high=%.1f => setting=%.1f", current, low, high, setting);
-            } else {
-                // fallback
-                setting = this->getTargetTemperature();
-            }
-        } else {
-            setting = this->getTargetTemperature();
-        }
-        break;
+        // HEAT_COOL is owned by evaluateInternalHeatCool: it picks HEAT or
+        // COOL based on current vs band and writes the appropriate single
+        // setpoint into wantedSettings. Nothing to compute here — return so
+        // we don't overwrite the value evaluateInternalHeatCool may have set.
+        this->evaluateInternalHeatCool("controlTemperature");
+        return;
 
     case climate::CLIMATE_MODE_AUTO:
         // Mode AUTO (legacy): keeps original behavior
@@ -550,9 +580,12 @@ void CN105Climate::controlMode() {
         break;
 
     case climate::CLIMATE_MODE_HEAT_COOL:
-        ESP_LOGI("control", "changing mode to HEAT_COOL (hardware AUTO)");
-        this->setModeSetting("AUTO");
-        this->setPowerSetting("ON");
+        // Don't send hardware AUTO — Mitsubishi's AUTO has a ±4°C deadband
+        // around a single setpoint and can't model a real high/low band.
+        // Defer to evaluateInternalHeatCool, which picks HEAT or COOL based
+        // on current vs band.
+        ESP_LOGI("control", "entering HEAT_COOL (internal mode selection)");
+        this->evaluateInternalHeatCool("controlMode");
         break;
 
     case climate::CLIMATE_MODE_AUTO:

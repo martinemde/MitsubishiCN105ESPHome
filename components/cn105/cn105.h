@@ -281,6 +281,14 @@ namespace esphome {
         void register_preset_target_temperature_low(climate::ClimatePreset preset, float t);
         void register_preset_target_temperature_high(climate::ClimatePreset preset, float t);
         bool processPresetChange(const esphome::climate::ClimateCall& call);
+
+        // Internal HEAT_COOL implementation: rather than handing the band off
+        // to Mitsubishi's hardware AUTO (which has its own ±4°C deadband and
+        // famously refuses to call for cooling), we pick HEAT or COOL ourselves
+        // based on current temperature vs the target band, and let Mitsubishi
+        // do per-mode compressor modulation. In-band, we leave the unit in
+        // whichever mode it was last in (no flip-flop).
+        void evaluateInternalHeatCool(const char* trigger);
         // Bootstrap connexion CN105 en loop() (ÃÂ©vite de perdre les tout premiers logs OTA)
         void maybe_start_connection_();
 
